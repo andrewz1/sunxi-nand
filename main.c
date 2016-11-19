@@ -3,7 +3,6 @@
 #include <linux/platform_device.h>
 
 #include "main.h"
-#include "nand1k.h"
 
 MODULE_AUTHOR("andrewz1");
 MODULE_LICENSE("GPL");
@@ -166,14 +165,9 @@ static int __init nand_init(void)
 		nand_err("platform_device_register fail\n");
 		goto free_driver;
 	}
-	err = nand1k_init();
-	if (err < 0) {
-		nand_err("nand1k_init fail\n");
-		goto free_device;
-	}
 	return 0;
-free_device:
-	platform_device_unregister(&nand_device);
+//free_device:
+//	platform_device_unregister(&nand_device);
 free_driver:
 	platform_driver_unregister(&nand_driver);
 	return err;
@@ -183,7 +177,6 @@ static void __exit nand_exit(void)
 {
 	if (get_nand_param("nand_used") <= 0)
 		return;
-	nand1k_exit();
 	platform_device_unregister(&nand_device);
 	platform_driver_unregister(&nand_driver);
 }

@@ -9,6 +9,9 @@ static struct clk *ahb_nand_clk = NULL;
 static struct clk *mod_nand_clk = NULL;
 static struct clk *parent_clk = NULL;
 
+/* "hosc","sdram_pll_p","sata_pll_2","sclk_none" */
+#define PARENT_CLK		"hosc" /* 24MHz */
+
 int nand_request_clk(void)
 {
 	int err;
@@ -21,7 +24,7 @@ int nand_request_clk(void)
 		err = PTR_ERR(ahb_nand_clk);
 		goto put_ahb_clk;
 	}
-	parent_clk = clk_get(NULL, "sdram_pll_p"); /* "hosc","sdram_pll_p","sata_pll_2","sclk_none" */
+	parent_clk = clk_get(NULL, PARENT_CLK);
 	if (IS_ERR(parent_clk)) {
 		err = PTR_ERR(parent_clk);
 		goto put_nand_clk;

@@ -4,15 +4,7 @@
 
 #include "main.h"
 
-#define BUFF_SZ (SZ_8K)
-
-#define _RESET_RB	do {	\
-	rbp = 0; rbl = 0;		\
-} while (0)
-
-#define _RESET_WB	do {	\
-	wbp = 0; wbl = BUFF_SZ;	\
-} while (0)
+#define BUFF_SZ (SZ_16K)
 
 static const u16 random_seed[128] = {
 	0x2b75, 0x0bd0, 0x5ca3, 0x62d1, 0x1c93, 0x07e9, 0x2162, 0x3a72,
@@ -33,48 +25,12 @@ static const u16 random_seed[128] = {
 	0x7c57, 0x0fbe, 0x46ce, 0x4939, 0x6b17, 0x37bb, 0x3e91, 0x76db,
 };
 
-#if 0
-static const u32 oob_val[128] = { /* oob values for erased pages */
-	0xc2b8530a, 0x887b4a0e, 0x96c49c5b, 0x8258ad8b, 0x40e2542d, 0x99d88874, 0xfa1c0d7a, 0x0a094d49,
-	0x104695a3, 0x3ba10f29, 0x781e0a82, 0x35911896, 0xe2982c8a, 0x971f617e, 0x3abaf30c, 0x4d5e467d,
-	0x55dd9878, 0xdce07bd5, 0x32c913b6, 0xd52466da, 0x4101a957, 0x2f813f56, 0x9d6f79c1, 0x3ce50426,
-	0xca4fb240, 0x0072aa13, 0xb5a318d1, 0x9aa88ccb, 0xe35c2e7a, 0xca3fb2ff, 0xc6a05cd5, 0x5f7d81f8,
-	0x6cc63ba2, 0x70d2146d, 0xc21bad70, 0xee403daa, 0xe2cc2c45, 0x7e5e027d, 0x806355d1, 0x8c4b45b1,
-	0x98708a14, 0x0c3abaf3, 0x91cc97bb, 0x548664a2, 0xe5f427e5, 0x2aad3339, 0x1e9d7c86, 0x49ca484d,
-	0xcf57be60, 0x5b12716d, 0x50a594d8, 0x8164a9db, 0x3f76fe1c, 0x9def783e, 0xec843b5a, 0x32baecf3,
-	0x72f1ec17, 0xc533a6ef, 0x19d97789, 0xf7ac1f3a, 0x00b6ab1c, 0xc49fa480, 0x06515d96, 0xc397af60,
-	0xf954099a, 0x493e4902, 0xcf144165, 0x1c1d7a86, 0xf6101d6a, 0xf0b3eb10, 0x981f757e, 0x34eae433,
-	0x28b134e9, 0x94a49b24, 0xbc30faeb, 0x4bbdb0f8, 0x9c537a6e, 0x08194a89, 0x11c297ac, 0x9a577261,
-	0xe457da60, 0x6d89c748, 0x94bc9b04, 0xab90cf6b, 0x0d12b96c, 0x72661222, 0xa14cd644, 0x78e9f437,
-	0x6f8dc0b8, 0xa93b36f1, 0x9afb73f1, 0x1d2a86cc, 0x8e974361, 0xc5cfa7bf, 0x4d5a4672, 0x6f51c197,
-	0xa83b350e, 0xfb780e0a, 0xc1eba830, 0x93276ede, 0x94b09b14, 0x081d4a86, 0x3042ea53, 0x65ca27b2,
-	0xe7a020d5, 0x6df6381d, 0x54219ad7, 0x13029153, 0x95136691, 0x30d11469, 0xfcc3fbaf, 0x1f1d7e86,
-	0x17969f63, 0x9d37791e, 0x2d6539d9, 0x4e2dbd38, 0x85af58c1, 0xc9d3b790, 0xddbc78fa, 0x917f69fe,
-	0xb0c4eba4, 0xafdf3f81, 0xbd60f9d4, 0xe1c4285a, 0x22fd2c06, 0x214529a6, 0xccf3bbef, 0x4eaa4332,
-};
-#endif
+static const u8 ecc_bytes[] = { 32, 46, 54, 60, 74, 88, 102, 110, 116, };
+static const u8 ecc_bits[] =  { 16, 24, 28, 32, 40, 48,  56,  60,  64, };
 
-#define _ECC_INIT(hi, lo) ((hi) << 16 | (lo))
-
-static const u32 ecc_bytes[] = {
-	_ECC_INIT(16, 32),
-	_ECC_INIT(24, 46),
-	_ECC_INIT(28, 54),
-	_ECC_INIT(32, 60),
-	_ECC_INIT(40, 74),
-	_ECC_INIT(48, 88),
-	_ECC_INIT(56, 102),
-	_ECC_INIT(60, 110),
-	_ECC_INIT(64, 116),
-};
-
-static void *rbuff;
-static dma_addr_t rbuff_dma;
-static int rbp, rbl; /* cur rbuff pos and left bytes */
-
-static void *wbuff;
-static dma_addr_t wbuff_dma;
-static int wbp, wbl = BUFF_SZ; /* cur wbuff pos and left bytes */
+static u8 *buff;
+static dma_addr_t buff_dma;
+static int rbp; /* cur buff pos for read */
 
 static inline void nand_controller_enable(void)
 {
@@ -103,12 +59,15 @@ static inline void nand_set_busw(int busw)
 
 static inline void nand_set_rbsel(u32 rb)
 {
-	clrset_wbit(NAND_CTL, NAND_RB_SEL, (rb & 0x3) << 3);
+	clrset_wbit(NAND_CTL, NAND_RB_SEL, (rb & 0x3) << 8);
 }
 
-static inline void nand_set_cesel(u32 ce)
+static inline void nand_set_cesel(int chip)
 {
-	clrset_wbit(NAND_CTL, NAND_CE_SEL, (ce & 0xf) << 24);
+	if (chip < 0)
+		set_wbit(NAND_CTL, NAND_CE_SEL);
+	else
+		clrset_wbit(NAND_CTL, NAND_CE_SEL, (chip & 0xf) << 24);
 }
 
 static inline void nand_ce_act(int on)
@@ -131,26 +90,18 @@ static inline void nand_set_ecc(u32 ecc)
 }
 
 /* don't clear ecc_mode */
-#define _ECC_MASK (NAND_ECC_EN | NAND_ECC_PIPELINE | NAND_ECC_EXCEPTION | NAND_ECC_BLOCK_SIZE)
+#define _ECC_MASK_EN (NAND_ECC_EN | NAND_ECC_PIPELINE | NAND_ECC_EXCEPTION)
+#define _ECC_MASK_DS (NAND_ECC_EN | NAND_ECC_PIPELINE | NAND_ECC_EXCEPTION | NAND_ECC_BLOCK_SIZE)
 
 static inline void disable_ecc(void)
 {
-	clr_wbit(NAND_ECC_CTL, _ECC_MASK);
+	clr_wbit(NAND_ECC_CTL, _ECC_MASK_DS);
 }
 
 /* ecc block size set to 1024 */
-static inline void enable_ecc(int pipline)
+static inline void enable_ecc(void)
 {
-	u32 cfg, rnd;
-
-	rnd = readl(NAND_ECC_CTL) & NAND_RND_EN;
-	cfg = NAND_ECC_EN;
-	if (pipline)
-		cfg |= NAND_ECC_PIPELINE;
-	// if random enabled, disable exception
-	if (!rnd)
-		cfg |= NAND_ECC_EXCEPTION;
-	clrset_wbit(NAND_ECC_CTL, _ECC_MASK, cfg);
+	clrset_wbit(NAND_ECC_CTL, _ECC_MASK_DS, _ECC_MASK_EN);
 }
 
 #define _RND_MASK	(NAND_RND_EN | NAND_RND_DIRECTION | NAND_RND_SIZE | NAND_RND_MASK)
@@ -228,26 +179,9 @@ static inline int wait_cmd_finish(void)
 	return -1;
 }
 
-#define _CMD_DMA_FLAGS (NAND_CMD_INT_FLAG | NAND_DMA_INT_FLAG)
-
-static inline int wait_cmd_dma(void) /* not used - need to test */
-{
-	int timeout = NAND_TMO;
-
-	do {
-		if ((readl(NAND_ST) & _CMD_DMA_FLAGS) == _CMD_DMA_FLAGS) {
-			set_wbit(NAND_ST, _CMD_DMA_FLAGS);
-			return 0;
-		}
-		udelay(1);
-		timeout--;
-	} while (timeout > 0);
-	return -1;
-}
-
 static inline int do_cmd(u32 cmd)
 {
-	if (wait_cmd_fifo() < 0)
+	if (wait_cmd_fifo())
 		return -1;
 	writel(cmd, NAND_CMD);
 	return wait_cmd_finish();
@@ -255,50 +189,49 @@ static inline int do_cmd(u32 cmd)
 
 static inline int do_cmd_dma(u32 cmd, int rw, dma_addr_t dma_addr, u32 dma_len)
 {
-	if (wait_cmd_fifo() < 0)
+	int err;
+
+	if (wait_cmd_fifo())
 		return -1;
 	nand_to_dma();
 	nand_start_dma(rw, dma_addr, dma_len);
 	writel(cmd, NAND_CMD);
-	if (wait_dma_finish() < 0) {
-		nand_to_ahb();
-		return -1;
-	}
+	err = wait_dma_finish();
 	nand_to_ahb();
+	if (err)
+		return -1;
 	return wait_cmd_finish();
 }
 
-static inline int get_status(void)
+static inline u32 get_status(void)
 {
 	u32 cmd;
 
-	writel(0, NAND_RAM0_BASE);
 	nand_to_ahb();
-	cmd = NAND_CMD_STATUS | NAND_SEND_FIRST_CMD;
+	cmd = NAND_CMD_STATUS
+		| NAND_SEND_FIRST_CMD;
 	_SET_ADDR(cmd, 0);
 	_SET_READ(cmd);
 	writel(1, NAND_CNT);
-	if (do_cmd(cmd) < 0)
-		return -1;
-	return (int)(readl(NAND_RAM0_BASE) & 0xff);
+	if (do_cmd(cmd))
+		return NAND_ERR_STAT;
+	return (readl(NAND_RAM0_BASE) & 0xff);
 }
 
 static inline int wait_status(u32 mask, u32 res)
 {
-	int timeout = NAND_TMO, err;
+	int timeout = NAND_TMO;
+	u32 err;
 
 	do {
 		err = get_status();
-		if (err < 0) {
-			nand_err("%s: get_status error\n", __func__);
+		if (err == NAND_ERR_STAT)
 			return -1;
-		}
 		else if ((err & mask) == res)
 			return err;
 		udelay(1);
 		timeout--;
 	} while (timeout > 0);
-	nand_err("%s: timeout, last status %d\n", __func__, err);
 	return -1;
 }
 
@@ -309,15 +242,12 @@ static inline int wait_status(u32 mask, u32 res)
  eraseblocks fall in bbt
  todo: make this value configurable
  */
-static inline int ecc_result(struct nand_chip *chip, int step)
+static inline u32 ecc_result(struct nand_chip *chip, int step)
 {
-	u32 mask = 1 << (step & 0xf);
 	u32 reg = (step & 0xc) >> 2;
 	u32 shift = (step & 0x3) << 3;
 	u32 corr;
 
-	if (readl(NAND_ECC_ST) & mask)
-		return -1;
 	 /* get corrected bits for step */
 	corr = (readl(NAND_ERR_CNT(reg)) >> shift) & 0xff;
 	if (corr > (chip->ecc.strength - _MAX_BITFLIP))
@@ -329,22 +259,17 @@ int nand_controller_init(void)
 {
 	int ret;
 
-	rbuff = dma_alloc_coherent(NULL, BUFF_SZ, &rbuff_dma, GFP_KERNEL);
-	if (!rbuff)
+	buff = dma_alloc_coherent(NULL, BUFF_SZ, &buff_dma, GFP_KERNEL);
+	if (!buff)
 		return -ENOMEM;
-	wbuff = dma_alloc_coherent(NULL, BUFF_SZ, &wbuff_dma, GFP_KERNEL);
-	if (!wbuff) {
-		ret = -ENOMEM;
-		goto free_rdma;
-	}
 	ret = nand_request_clk();
 	if (ret < 0)
-		goto free_wdma;
+		goto free_dma;
 	ret = nand_request_gpio();
 	if (ret < 0)
 		goto release_clk;
 	nand_controller_reset();
-	ret = nand_request_irq();
+	ret = nand_request_irq(); /* not used */
 	if (ret < 0)
 		goto release_gpio;
 	ret = nand_request_dma();
@@ -360,10 +285,8 @@ release_gpio:
 	nand_release_gpio();
 release_clk:
 	nand_release_clk();
-free_wdma:
-	dma_free_coherent(NULL, BUFF_SZ, wbuff, wbuff_dma);
-free_rdma:
-	dma_free_coherent(NULL, BUFF_SZ, rbuff, rbuff_dma);
+free_dma:
+	dma_free_coherent(NULL, BUFF_SZ, buff, buff_dma);
 	return ret;
 }
 
@@ -375,28 +298,20 @@ void nand_controller_exit(void)
 	nand_release_irq();
 	nand_release_gpio();
 	nand_release_clk();
-	dma_free_coherent(NULL, BUFF_SZ, wbuff, wbuff_dma);
-	dma_free_coherent(NULL, BUFF_SZ, rbuff, rbuff_dma);
+	dma_free_coherent(NULL, BUFF_SZ, buff, buff_dma);
 }
-
-#define _RST_CNT 10
 
 int __nand_chip_reset(void)
 {
-	int i, timeout = NAND_TMO;
+	int timeout = NAND_TMO;
 	u32 cmd;
 
 	nand_to_ahb();
-	for (i = 0; i < _RST_CNT; i++) {
-		cmd = NAND_CMD_RESET
-			| NAND_SEND_FIRST_CMD;
-		_SET_ADDR(cmd, 0);
-		_SET_NODATA(cmd);
-		if (do_cmd(cmd) >= 0)
-			break;
-		mdelay(1);
-	}
-	if (i == _RST_CNT)
+	cmd = NAND_CMD_RESET
+		| NAND_SEND_FIRST_CMD;
+	_SET_ADDR(cmd, 0);
+	_SET_NODATA(cmd);
+	if (do_cmd(cmd))
 		return -1;
 	do {
 		if ((readl(NAND_ST) & NAND_RB_ALL) == NAND_RB_ALL)
@@ -409,10 +324,8 @@ int __nand_chip_reset(void)
 
 int __nand_chip_readid(int addr)
 {
-	int i;
 	u32 cmd, len = 8;
 
-	_RESET_RB;
 	nand_to_ahb();
 	cmd = NAND_CMD_READID
 		| NAND_SEND_FIRST_CMD
@@ -420,23 +333,20 @@ int __nand_chip_readid(int addr)
 		| NAND_DATA_METHOD;
 	_SET_ADDR(cmd, 1);
 	writel(addr & 0xff, NAND_ADDR_LOW);
-	writel(0, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
 	writel(len, NAND_CNT);
-	if (do_cmd_dma(cmd, 0, rbuff_dma, len) < 0)
-		return -1;
-	for (i = 4; i < 8; i++)
-		if (!(memcmp(rbuff, rbuff + i, 8 - i)))
-			break;
-	rbl = i;
-	return 0;
+	return do_cmd_dma(cmd, 0, buff_dma, len);
+		// return -1;
+	// for (i = 4; i < 8; i++)
+	// 	if (!(memcmp(buff, buff + i, 8 - i)))
+	// 		break;
+	// return 0;
 }
 
 int __nand_chip_param(int addr)
 {
 	u32 cmd, len = 1024;
 
-	_RESET_RB;
 	nand_to_ahb();
 	cmd = NAND_CMD_PARAM
 		| NAND_SEND_FIRST_CMD
@@ -444,29 +354,23 @@ int __nand_chip_param(int addr)
 		| NAND_DATA_METHOD;
 	_SET_ADDR(cmd, 1);
 	writel(addr & 0xff, NAND_ADDR_LOW);
-	writel(0, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
 	writel(len, NAND_CNT);
-	if (do_cmd_dma(cmd, 0, rbuff_dma, len) < 0)
-		return -1;
-	rbl = len;
-	return 0;
+	return do_cmd_dma(cmd, 0, buff_dma, len);
 }
 
 int __nand_chip_read_page(struct mtd_info *mtd, int page)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
-	u32 cmd, tmp;
-	u32 len = mtd->writesize;
-	u32 blk = mtd->writesize >> 10;
-	struct nand_save save;
+	struct nand_chip *chip = &info->chip;
+	u32 cmd;
+	int err;
 
-	_RESET_RB;
-	nand_save(&save);
+	rbp = 0;
 	nand_set_page(info->page);
 	nand_set_ecc(info->ecc);
 	enable_random(page);
-	enable_ecc(1);
+	enable_ecc();
 	nand_to_ahb();
 	cmd = NAND_RCMD
 		| NAND_SEND_FIRST_CMD
@@ -475,35 +379,28 @@ int __nand_chip_read_page(struct mtd_info *mtd, int page)
 		| NAND_CMD_TYPE_PAGE;
 	writel(NAND_RSET, NAND_RCMD_SET);
 	_SET_ADDR(cmd, 5);
-	tmp = (page & 0xffffU) << 16;
-	writel(tmp, NAND_ADDR_LOW);
-	tmp = (page & 0xff0000U) >> 16;
-	writel(tmp, NAND_ADDR_HIGH);
+	writel((page & 0xffffU) << 16, NAND_ADDR_LOW);
+	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
-	writel(blk, NAND_BLOCK_NUM);
-	if (do_cmd_dma(cmd, 0, rbuff_dma, len) < 0) {
-		nand_restore(&save);
-		return -1;
-	}
-	nand_restore(&save);
-	rbl = len;
-	return 0;
+	writel(chip->ecc.steps, NAND_BLOCK_NUM);
+	err = do_cmd_dma(cmd, 0, buff_dma, mtd->writesize);
+	disable_ecc();
+	disable_random();
+	return err;
 }
 
 int __nand_chip_read_page1k(struct mtd_info *mtd, int page)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
-	u32 cmd, tmp;
-	u32 len = mtd->writesize;
-	u32 blk = mtd->writesize >> 10;
-	struct nand_save save;
+	struct nand_chip *chip = &info->chip;
+	u32 cmd;
+	int err;
 
-	_RESET_RB;
-	nand_save(&save);
+	rbp = 0;
 	nand_set_page(info->page);
 	nand_set_ecc(info->ecc1k);
 	enable_random1k();
-	enable_ecc(1);
+	enable_ecc();
 	nand_to_ahb();
 	cmd = NAND_RCMD
 		| NAND_SEND_FIRST_CMD
@@ -513,59 +410,48 @@ int __nand_chip_read_page1k(struct mtd_info *mtd, int page)
 		| NAND_SEQ;
 	writel(NAND_RSET, NAND_RCMD_SET);
 	_SET_ADDR(cmd, 5);
-	tmp = (page & 0xffffU) << 16;
-	writel(tmp, NAND_ADDR_LOW);
-	tmp = (page & 0xff0000U) >> 16;
-	writel(tmp, NAND_ADDR_HIGH);
+	writel((page & 0xffffU) << 16, NAND_ADDR_LOW);
+	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
-	writel(blk, NAND_BLOCK_NUM);
-	if (do_cmd_dma(cmd, 0, rbuff_dma, len) < 0) {
-		nand_restore(&save);
-		return -1;
-	}
-	nand_restore(&save);
-	rbl = len;
-	return 0;
+	writel(chip->ecc.steps, NAND_BLOCK_NUM);
+	err = do_cmd_dma(cmd, 0, buff_dma, mtd->writesize);
+	disable_ecc();
+	disable_random();
+	return err;
 }
 
-int __do_read_page(struct mtd_info *mtd, int column, int page)
-{
-	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
-
-	if (column > 0) {
-		nand_err("%s: column %d\n", __func__, column);
-		return -1;
-	}
-	if (page < info->pages1k)
-		return __nand_chip_read_page1k(mtd, page);
-	else
-		return __nand_chip_read_page(mtd, page);
-}
-
-int __do_read_oob(struct mtd_info *mtd, int page)
+int __do_read_page(struct mtd_info *mtd, int page)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
 	struct nand_chip *chip = &info->chip;
-	int i;
-	u32 mask = (1 << chip->ecc.steps) - 1;
+	u32 *oob = (u32 *)chip->oob_poi;
+	u32 err_mask = (1 << chip->ecc.steps) - 1;
+	u32 empty_mask = err_mask << 16;
+	int err, i;
 
-	/* first try to read plain page */
-	if (__do_read_page(mtd, 0, page) < 0)
+	if (page < info->pages1k)
+		err = __nand_chip_read_page1k(mtd, page);
+	else
+		err = __nand_chip_read_page(mtd, page);
+	if (err < 0)
 		return -1;
-	_RESET_RB;
-	if ((readl(NAND_ECC_ST) & mask) == mask)
+	if ((readl(NAND_ECC_ST) & empty_mask) == empty_mask) {
+		memset(buff, 0xff, mtd->writesize);
 		for (i = 0; i < chip->ecc.steps; i++)
-			writel(0xffffffffU, NAND_USER_DATA(i));
+			oob[i] = 0xffffffffU;
+	} else {
+		for (i = 0; i < chip->ecc.steps; i++)
+			oob[i] = readl(NAND_USER_DATA(i));
+	}
 	return 0;
 }
 
 int __nand_chip_erase(struct mtd_info *mtd, int page)
 {
-	u32 cmd, blk_mask;
+	u32 pgs_per_blk = mtd->erasesize / mtd->writesize;
+	u32 cmd;
 
-	blk_mask = 1 << (mtd->erasesize_shift - mtd->writesize_shift);
-	blk_mask = ~(blk_mask - 1);
-	blk_mask &= 0xffffffU;
+	page = rounddown(page, pgs_per_blk);
 	nand_to_ahb();
 	cmd = NAND_ERASE
 		| NAND_SEND_FIRST_CMD
@@ -573,10 +459,9 @@ int __nand_chip_erase(struct mtd_info *mtd, int page)
 		| NAND_SEND_SECOND_CMD;
 	writel(NAND_ESET, NAND_RCMD_SET);
 	_SET_ADDR(cmd, 3);
-	writel(page & blk_mask, NAND_ADDR_LOW);
-	writel(0, NAND_ADDR_HIGH);
+	writel(page, NAND_ADDR_LOW);
 	_SET_NODATA(cmd);
-	if (do_cmd(cmd) < 0)
+	if (do_cmd(cmd))
 		return -1;
 	if (wait_status(NAND_STATUS_FAIL, 0) < 0)
 		return -1;
@@ -586,16 +471,14 @@ int __nand_chip_erase(struct mtd_info *mtd, int page)
 int __nand_chip_write_page(struct mtd_info *mtd, int page, int cache)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
-	u32 cmd, tmp;
-	u32 len = mtd->writesize;
-	u32 blk = mtd->writesize >> 10;
-	struct nand_save save;
+	struct nand_chip *chip = &info->chip;
+	u32 cmd;
+	int err;
 
-	nand_save(&save);
 	nand_set_page(info->page);
 	nand_set_ecc(info->ecc);
 	enable_random(page);
-	enable_ecc(1);
+	enable_ecc();
 	nand_to_ahb();
 	cmd = NAND_WCMD
 		| NAND_SEND_FIRST_CMD
@@ -607,17 +490,15 @@ int __nand_chip_write_page(struct mtd_info *mtd, int page, int cache)
 	else
 		writel(NAND_WSET, NAND_WCMD_SET);
 	_SET_ADDR(cmd, 5);
-	tmp = (page & 0xffffU) << 16;
-	writel(tmp, NAND_ADDR_LOW);
-	tmp = (page & 0xff0000U) >> 16;
-	writel(tmp, NAND_ADDR_HIGH);
+	writel((page & 0xffffU) << 16, NAND_ADDR_LOW);
+	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_WRITE(cmd);
-	writel(blk, NAND_BLOCK_NUM);
-	if (do_cmd_dma(cmd, 1, wbuff_dma, len) < 0) {
-		nand_restore(&save);
+	writel(chip->ecc.steps, NAND_BLOCK_NUM);
+	err = do_cmd_dma(cmd, 1, buff_dma, mtd->writesize);
+	disable_ecc();
+	disable_random();
+	if (err)
 		return -1;
-	}
-	nand_restore(&save);
 	if (cache)
 		return 0;
 	if (wait_status(NAND_STATUS_FAIL, 0) < 0)
@@ -628,16 +509,14 @@ int __nand_chip_write_page(struct mtd_info *mtd, int page, int cache)
 int __nand_chip_write_page1k(struct mtd_info *mtd, int page, int cache)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
-	u32 cmd, tmp;
-	u32 len = mtd->writesize;
-	u32 blk = mtd->writesize >> 10;
-	struct nand_save save;
+	struct nand_chip *chip = &info->chip;
+	u32 cmd;
+	int err;
 
-	nand_save(&save);
 	nand_set_page(info->page);
 	nand_set_ecc(info->ecc1k);
 	enable_random1k();
-	enable_ecc(1);
+	enable_ecc();
 	nand_to_ahb();
 	cmd = NAND_WCMD
 		| NAND_SEND_FIRST_CMD
@@ -650,17 +529,15 @@ int __nand_chip_write_page1k(struct mtd_info *mtd, int page, int cache)
 	else
 		writel(NAND_WSET, NAND_WCMD_SET);
 	_SET_ADDR(cmd, 5);
-	tmp = (page & 0xffffU) << 16;
-	writel(tmp, NAND_ADDR_LOW);
-	tmp = (page & 0xff0000U) >> 16;
-	writel(tmp, NAND_ADDR_HIGH);
+	writel((page & 0xffffU) << 16, NAND_ADDR_LOW);
+	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_WRITE(cmd);
-	writel(blk, NAND_BLOCK_NUM);
-	if (do_cmd_dma(cmd, 1, wbuff_dma, len) < 0) {
-		nand_restore(&save);
+	writel(chip->ecc.steps, NAND_BLOCK_NUM);
+	err = do_cmd_dma(cmd, 1, buff_dma, mtd->writesize);
+	disable_ecc();
+	disable_random();
+	if (err)
 		return -1;
-	}
-	nand_restore(&save);
 	if (cache)
 		return 0;
 	if (wait_status(NAND_STATUS_FAIL, 0) < 0)
@@ -668,14 +545,15 @@ int __nand_chip_write_page1k(struct mtd_info *mtd, int page, int cache)
 	return 0;
 }
 
-int __do_write_page(struct mtd_info *mtd, int column, int page, int cache)
+int __do_write_page(struct mtd_info *mtd, int page, int cache)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
+	struct nand_chip *chip = &info->chip;
+	u32 *oob = (u32 *)chip->oob_poi;
+	int i;
 
-	if (column > 0) {
-		nand_err("%s: column %d\n", __func__, column);
-		return -1;
-	}
+	for (i = 0; i < chip->ecc.steps; i++)
+		writel(oob[i], NAND_USER_DATA(i));
 	if (page < info->pages1k)
 		return __nand_chip_write_page1k(mtd, page, cache);
 	else
@@ -684,65 +562,35 @@ int __do_write_page(struct mtd_info *mtd, int column, int page, int cache)
 
 /* linux kernel funcs */
 
-
 u8 chip_read_byte(struct mtd_info *mtd)
 {
-	u8 *pp = (rbuff + rbp);
-
-	if ((void *)pp < rbuff || (void *)pp >= (rbuff + BUFF_SZ) || rbl == 0)
-		return 0xffU;
+	u8 ret = buff[rbp];
 	rbp++;
-	rbl--;
-	return *pp;
+	return ret;
 }
 
 u16 chip_read_word(struct mtd_info *mtd)
 {
-	u16 *pp = (rbuff + rbp);
-
-	if ((void *)pp < rbuff || (void *)pp >= (rbuff + BUFF_SZ) || rbl == 0)
-		return 0xffffU;
+	u16 *bp = (u16 *)(buff + rbp);
+	u16 ret = *bp;
 	rbp += 2;
-	rbl -= 2;
-	return *pp;
+	return ret;
 }
 
 void chip_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 {
-	int l = min(wbl, len);
-	memcpy(wbuff + wbp, buf, l);
-	wbp += l;
-	wbl -= l;
+	memcpy(buff, buf, len);
 }
 
 void chip_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 {
-	int l = min(rbl, len);
-	memcpy(buf, rbuff + rbp, l);
-	rbp += l;
-	rbl -= l;
-}
-
-int chip_verify_buf(struct mtd_info *mtd, const u8 *buf, int len)
-{
-	return (memcmp(buf, rbuff, len) ? -EFAULT : 0);
+	memcpy(buf, buff + rbp, len);
+	rbp += len;
 }
 
 void chip_select_chip(struct mtd_info *mtd, int chip)
 {
-	if (chip < 0)
-		return;
-	nand_set_cesel((u32)chip);
-}
-
-int chip_block_bad(struct mtd_info *mtd, loff_t ofs, int getchip)
-{
-	return 0;
-}
-
-int chip_block_markbad(struct mtd_info *mtd, loff_t ofs)
-{
-	return 0;
+	nand_set_cesel(chip);
 }
 
 void chip_cmd_ctrl(struct mtd_info *mtd, int dat, unsigned int ctrl)
@@ -754,8 +602,8 @@ int chip_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 {
 	struct nand_info *info = container_of(mtd, struct nand_info, mtd);
 	struct nand_flash_dev *d;
-	int err, ecc, found = 0;
-	u32 blks, ecc_blk;
+	int err, ecc_max, found = 0;
+	u32 ecc_blks, ecc_blk, oobsize;
 
 	for (d = nand_flash_ids; d->name; d++)
 		if (id_data[1] == d->id) {
@@ -769,7 +617,6 @@ int chip_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 	chip->options = d->options;
 	mtd->size = d->chipsize;
 	mtd->size <<= 20;
-	mtd->writebufsize = BUFF_SZ;
 #if 0
 	switch (id_data[0]) {
 	case NAND_MFR_HYNIX:
@@ -785,8 +632,11 @@ int chip_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 #endif
 	if (err < 0)
 		return err;
-	info->page = mtd->writesize_shift - 10;
-	blks = 1 << info->page;
+	oobsize = mtd->oobsize;
+	mtd->oobsize = 0; /* just in case */
+	mtd->writebufsize = mtd->writesize;
+	info->page = ffs(mtd->writesize >> 10) - 1;
+	ecc_blks = 1 << info->page;
 	/* get params from fex */
 	info->pages1k = get_nand_param("pages1k");
 	if (info->pages1k < 0)
@@ -794,28 +644,28 @@ int chip_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 	nand_info("PAGES1k set to %d pages (%uK)\n", info->pages1k, info->pages1k << info->page);
 	info->ecc = get_nand_param("ecc");
 	if (info->ecc < 0) { /* calc maximum */
-		ecc_blk = err / blks;
-		for (ecc = NAND_ECC_BCH64; ecc >= NAND_ECC_BCH16; ecc--)
-			if (ecc_blk >= (ecc_bytes[ecc] & 0xffffU))
+		ecc_blk = oobsize / ecc_blks;
+		for (ecc_max = NAND_ECC_BCH64; ecc_max >= NAND_ECC_BCH16; ecc_max--)
+			if (ecc_blk >= (ecc_bytes[ecc_max]))
 				break;
-		if (ecc < 0)
-			ecc = 0;
-		info->ecc = ecc;
+		if (ecc_max < 0)
+			ecc_max = 0;
+		info->ecc = ecc_max;
 	}
-	nand_info("ECC set to %d (%ubits/1K)\n", info->ecc, ecc_bytes[info->ecc] >> 16);
+	nand_info("ECC set to %d (%ubits/1K)\n", info->ecc, ecc_bits[info->ecc]);
 	info->ecc1k = get_nand_param("ecc1k");
 	if (info->ecc1k < 0)
 		info->ecc1k = ECC_1K_DEF;
-	nand_info("ECC1k set to %d (%ubits/1K)\n", info->ecc1k, ecc_bytes[info->ecc1k] >> 16);
+	nand_info("ECC1k set to %d (%ubits/1K)\n", info->ecc1k, ecc_bits[info->ecc1k]);
 	memset(&info->el, 0, sizeof(struct nand_ecclayout));
-	info->el.oobfree[0].length = blks << 2; /* one u32 per ecc block */
-	mtd->oobsize = blks << 2;
+	info->el.oobfree[0].length = ecc_blks * 4; /* one u32 per ecc block */
+	mtd->oobsize = ecc_blks * 4;
 	chip->ecc.mode = NAND_ECC_HW;
-	chip->ecc.steps = blks;
+	chip->ecc.steps = ecc_blks;
 	chip->ecc.size = SZ_1K;
-	chip->ecc.bytes = ecc_bytes[info->ecc] & 0xffffU;
-	chip->ecc.total = chip->ecc.bytes * blks;
-	chip->ecc.strength = ecc_bytes[info->ecc] >> 16;
+	chip->ecc.bytes = ecc_bytes[info->ecc];
+	chip->ecc.strength = ecc_bits[info->ecc];
+	chip->ecc.total = chip->ecc.bytes * chip->ecc.steps;
 	chip->ecc.layout = &info->el;
 	nand_set_page(info->page);
 	nand_set_ecc(info->ecc);
@@ -839,13 +689,15 @@ static inline int send_cmd(u32 cmd)
 
 static inline int send_cmd_dma(u32 cmd, int dma_rw, dma_addr_t dma_addr, u32 dma_len)
 {
+	int err;
+
 	nand_to_dma();
 	nand_start_dma(dma_rw, dma_addr, dma_len);
 	writel(cmd, NAND_CMD);
-	if (wait_dma_finish() < 0) {
-		nand_to_ahb();
+	err = wait_dma_finish();
+	nand_to_ahb();
+	if (err)
 		return -1;
-	}
 	nand_to_ahb();
 	return wait_cmd_finish();
 }
@@ -857,34 +709,27 @@ void chip_erase_cmd(struct mtd_info *mtd, int page)
 
 void chip_cmdfunc(struct mtd_info *mtd, unsigned command, int column, int page_addr)
 {
-	int err;
-	u8 *pp = rbuff;
+	u32 *sp = (u32 *)buff;
 
-//	nand_err("%s: %04x, %d, %d\n", __func__, command, column, page_addr);
 	switch (command) {
 	case NAND_CMD_RESET:
 		__nand_chip_reset();
 		break;
 	case NAND_CMD_READID:
+		rbp = 0;
 		__nand_chip_readid(column);
 		break;
 	case NAND_CMD_PARAM:
+		rbp = 0;
 		__nand_chip_param(column);
 		break;
-	case NAND_CMD_READOOB:
-		__do_read_oob(mtd, page_addr);
-		break;
 	case NAND_CMD_READ0:
-		__do_read_page(mtd, column, page_addr);
+	case NAND_CMD_READOOB:
+		__do_read_page(mtd, page_addr);
 		break;
 	case NAND_CMD_STATUS:
-		_RESET_RB;
-		err = get_status();
-		if (err < 0)
-			*pp = 0xffU;
-		else
-			*pp = (u8)err;
-		rbl = 1;
+		rbp = 0;
+		*sp = get_status();
 		break;
 	case NAND_CMD_ERASE1:
 		__nand_chip_erase(mtd, page_addr);
@@ -902,22 +747,10 @@ int chip_waitfunc(struct mtd_info *mtd, struct nand_chip *chip)
 	return wait_status(NAND_STATUS_FAIL, 0);
 }
 
-int chip_scan_bbt(struct mtd_info *mtd)
-{
-	nand_err("%s:\n", __func__);
-	return 0;
-}
-
 int chip_write_page(struct mtd_info *mtd, struct nand_chip *chip, const u8 *buf, int page, int cached, int raw)
 {
-	int i;
-	u32 *oob = (u32 *)chip->oob_poi;
-
-	_RESET_WB;
-	chip_write_buf(mtd, buf, mtd->writesize);
-	for (i = 0; i < chip->ecc.steps; i++)
-		writel(oob[i], NAND_USER_DATA(i));
-	if (__do_write_page(mtd, 0, page, cached) < 0)
+	memcpy(buff, buf, mtd->writesize);
+	if (__do_write_page(mtd, page, cached) < 0)
 		return -EIO;
 	return 0;
 }
@@ -939,87 +772,45 @@ int chip_ecc_correct(struct mtd_info *mtd, u8 *dat, u8 *read_ecc, u8 *calc_ecc)
 	return 0;
 }
 
-static int __chip_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, int page, int raw)
+int chip_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, int page)
 {
-	int i, err;
-	u32 ecc_st;
-	u32 *oob = (u32 *)chip->oob_poi;
-	u32 mask = (1 << chip->ecc.steps) - 1;
+	u32 mask, ecc_st = readl(NAND_ECC_ST);
+	int i;
 
-	ecc_st = readl(NAND_ECC_ST) & mask;
-	if (ecc_st == mask) { /* empty page */
-		memset(buf, 0xff, mtd->writesize);
-		for (i = 0; i < chip->ecc.steps; i++)
-			oob[i] = 0xffffffffU;
-	} else {
-		if (ecc_st)
-			nand_err("ECC status for page %d is 0x%04x\n", page, ecc_st);
-		chip_read_buf(mtd, buf, mtd->writesize);
-		for (i = 0; i < chip->ecc.steps; i++) {
-			oob[i] = readl(NAND_USER_DATA(i));
-			if (!raw) {
-				err = ecc_result(chip, i);
-				if (err < 0)
-					mtd->ecc_stats.failed++;
-				else
-					mtd->ecc_stats.corrected += err;
-			}
-		}
+	memcpy(buf, buff, mtd->writesize);
+	for (i = 0; i < chip->ecc.steps; i++) {
+		mask = 1 << i;
+		if (ecc_st & mask)
+			mtd->ecc_stats.failed++;
+		else
+			mtd->ecc_stats.corrected += ecc_result(chip, i);
 	}
 	return 0;
 }
 
-int chip_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, int page)
-{
-	return __chip_ecc_read_page(mtd, chip, buf, page, 0);
-}
-
 int chip_ecc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, int page)
 {
-	return __chip_ecc_read_page(mtd, chip, buf, page, 1);
+	memcpy(buf, buff, mtd->writesize);
+	return 0;
 }
 
 int chip_ecc_read_oob(struct mtd_info *mtd, struct nand_chip *chip, int page, int sndcmd)
 {
-	int i;
-	u32 *oob = (u32 *)chip->oob_poi;
-	u32 mask = (1 << chip->ecc.steps) - 1;
-
-	if (sndcmd) {
-		if (__do_read_page(mtd, 0, page) < 0)
+	if (sndcmd)
+		if (__do_read_page(mtd, page) < 0)
 			return -EIO;
-	}
-	_RESET_RB;
-	if ((readl(NAND_ECC_ST) & mask) == mask)
-		for (i = 0; i < chip->ecc.steps; i++)
-			oob[i] = 0xffffffffU;
-	else
-		for (i = 0; i < chip->ecc.steps; i++)
-			oob[i] = readl(NAND_USER_DATA(i));
 	return 0;
 }
 
 void chip_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip, const u8 *buf)
 {
-	int i;
-	u32 *oob = (u32 *)chip->oob_poi;
-
-	_RESET_WB;
-	chip_write_buf(mtd, buf, mtd->writesize);
-	for (i = 0; i < chip->ecc.steps; i++)
-		writel(oob[i], NAND_USER_DATA(i));
+	memcpy(buff, buf, mtd->writesize);
 }
 
 int chip_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
 {
-	int i;
-	u32 *oob = (u32 *)chip->oob_poi;
-
-	_RESET_WB;
-	memset(wbuff, 0xffU, mtd->writesize);
-	for (i = 0; i < chip->ecc.steps; i++)
-		writel(oob[i], NAND_USER_DATA(i));
-	if (__do_write_page(mtd, 0, page, 0) < 0)
+	memset(buff, 0xff, mtd->writesize);
+	if (__do_write_page(mtd, page, 0) < 0)
 		return -EIO;
 	return 0;
 }

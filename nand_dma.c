@@ -21,15 +21,6 @@ static void nand_buff_done(struct sw_dma_chan *ch, void *buf, int size, enum sw_
 	complete_all(&nand_dma_done);
 }
 
-#if 0
-static int nand_dma_opfn(struct sw_dma_chan *ch, enum sw_chan_op op)
-{
-	if (op == SW_DMAOP_START)
-		INIT_COMPLETION(nand_dma_done);
-	return 0;
-}
-#endif
-
 int nand_request_dma(void)
 {
 	int ret;
@@ -42,9 +33,6 @@ int nand_request_dma(void)
 	ret = sw_dma_set_buffdone_fn(dma_ch, nand_buff_done);
 	if (ret < 0)
 		goto free_dma;
-//	ret = sw_dma_set_opfn(dma_ch, nand_dma_opfn);
-//	if (ret < 0)
-//		goto free_dma;
 	return 0;
 free_dma:
 	sw_dma_free(dma_ch, &nand_dma_client);

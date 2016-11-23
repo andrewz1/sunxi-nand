@@ -241,10 +241,8 @@
 /* NAND_MDMA_CNT */
 #define n_MDMA_CNT					(0x7fff << 0)
 
-#define NAND_DEF_FREQ				20000000U	/* 20MHz */
+#define NAND_DEF_FREQ				24000000U	/* 24MHz */
 
-// #define CMD_CHIP_RESET				0xffU
-// #define CMD_CHIP_READID				0x90U
-// #define CMD_CHIP_PAGE_READ			0x00U
+#define NAND_ERR_STAT				0xffffffffU
 
 #endif

@@ -71,60 +71,40 @@
 
 int hynix_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 {
-	int oobsize;
-
 	/* page size */
 	switch (id_data[3] & PAGE_SIZE_MASK) {
 	case PAGE_SIZE_2K:
 		mtd->writesize = SZ_2K;
-		mtd->writesize_mask = SZ_2K - 1;
-		mtd->writesize_shift = 11;
 		break;
 	case PAGE_SIZE_4K:
 		mtd->writesize = SZ_4K;
-		mtd->writesize_mask = SZ_4K - 1;
-		mtd->writesize_shift = 12;
 		break;
 	case PAGE_SIZE_8K:
 		mtd->writesize = SZ_8K;
-		mtd->writesize_mask = SZ_8K - 1;
-		mtd->writesize_shift = 13;
 		break;
 	default:
-		return -ENODEV;
+		mtd->writesize = SZ_16K; /* check this */
 		break;
 	}
 	/* block size */
 	switch (id_data[3] & BLOCK_SIZE_MASK) {
 	case BLOCK_SIZE_128K:
 		mtd->erasesize = SZ_128K;
-		mtd->erasesize_mask = SZ_128K - 1;
-		mtd->erasesize_shift = 17;
 		break;
 	case BLOCK_SIZE_256K:
 		mtd->erasesize = SZ_256K;
-		mtd->erasesize_mask = SZ_256K - 1;
-		mtd->erasesize_shift = 18;
 		break;
 	case BLOCK_SIZE_512K:
 		mtd->erasesize = SZ_512K;
-		mtd->erasesize_mask = SZ_512K - 1;
-		mtd->erasesize_shift = 19;
 		break;
-	// case BLOCK_SIZE_768K: /* need to test */
-	// 	mtd->erasesize = SZ_512K + SZ_256K;
-	// 	mtd->erasesize_mask = 0;
-	// 	mtd->erasesize_shift = 0;
-	//	break;
+	case BLOCK_SIZE_768K: /* need to test */
+		mtd->erasesize = SZ_512K + SZ_256K;
+		break;
 	case BLOCK_SIZE_1M:
 		mtd->erasesize = SZ_1M;
-		mtd->erasesize_mask = SZ_1M - 1;
-		mtd->erasesize_shift = 20;
 		break;
 	case BLOCK_SIZE_2M:
 		mtd->erasesize = SZ_2M;
-		mtd->erasesize_mask = SZ_2M - 1;
-		mtd->erasesize_shift = 21;
 		break;
 	default:
 		return -ENODEV;
@@ -133,29 +113,29 @@ int hynix_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 	/* real oob size */
 	switch (id_data[3] & SPARE_SIZE_MASK) {
 	case SPARE_SIZE_640:
-		oobsize = 640;
+		mtd->oobsize = 640;
 		break;
 	case SPARE_SIZE_448:
-		oobsize = 448;
+		mtd->oobsize = 448;
 		break;
 	case SPARE_SIZE_224:
-		oobsize = 224;
+		mtd->oobsize = 224;
 		break;
 	case SPARE_SIZE_128:
-		oobsize = 128;
+		mtd->oobsize = 128;
 		break;
 	case SPARE_SIZE_64:
-		oobsize = 64;
+		mtd->oobsize = 64;
 		break;
 	case SPARE_SIZE_32:
-		oobsize = 32;
+		mtd->oobsize = 32;
 		break;
 	case SPARE_SIZE_16:
-		oobsize = 16;
+		mtd->oobsize = 16;
 		break;
 	default:
 		return -ENODEV;
 		break;
 	}
-	return oobsize;
+	return 0;
 }

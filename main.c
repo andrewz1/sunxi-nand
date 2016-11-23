@@ -40,17 +40,14 @@ static int __devinit nand_probe(struct platform_device *pdev)
 	info->chip.read_word = chip_read_word;
 	info->chip.read_buf = chip_read_buf;
 	info->chip.write_buf = chip_write_buf;
-	info->chip.verify_buf = chip_verify_buf; /* unused */
 	info->chip.select_chip = chip_select_chip;
-//	info->chip.block_bad = chip_block_bad;
-//	info->chip.block_markbad = chip_block_markbad;
+
 	info->chip.cmd_ctrl = chip_cmd_ctrl; /* unused */
 	info->chip.init_size = chip_init_size;
 	info->chip.dev_ready = chip_dev_ready;
 	info->chip.cmdfunc = chip_cmdfunc;
 	info->chip.waitfunc = chip_waitfunc;
 	info->chip.erase_cmd = chip_erase_cmd; /* reinit after scan */
-//	info->chip.scan_bbt = chip_scan_bbt;
 	info->chip.write_page = chip_write_page;
 
 	info->chip.ecc.hwctl = chip_ecc_hwctl; /* empty need for scan */
@@ -59,7 +56,7 @@ static int __devinit nand_probe(struct platform_device *pdev)
 
 	info->chip.ecc.read_page = chip_ecc_read_page; /* nand_read_page_hwecc */
 	info->chip.ecc.read_page_raw = chip_ecc_read_page_raw; /* nand_read_page_raw */
-	//- info->chip.ecc.read_subpage = chip_ecc_read_subpage; /* used only for soft ecc - not used */
+	// info->chip.ecc.read_subpage = chip_ecc_read_subpage; /* used only for soft ecc - not used */
 	info->chip.ecc.read_oob = chip_ecc_read_oob; /* nand_read_oob_std */
 	info->chip.ecc.read_oob_raw = chip_ecc_read_oob; /* nand_read_oob_std */
 
@@ -73,29 +70,24 @@ static int __devinit nand_probe(struct platform_device *pdev)
 		nand_err("nand scan fail\n");
 		goto free_info;
 	}
-
 	info->chip.erase_cmd = chip_erase_cmd;
 
-//	tmp = info->mtd.writesize * info->pages1k;
-	tmp = info->pages1k;
-	tmp <<= info->mtd.writesize_shift;
-
-	info->parts[0].name = "boot";
+	tmp = info->mtd.writesize * info->pages1k;
+	info->parts[0].name = "SPL";
 	info->parts[0].size = tmp;
 	info->parts[0].offset = 0;
-//	info->parts[0].mask_flags = MTD_WRITEABLE;
+//	info->parts[0].mask_flags = MTD_WRITEABLE; /* for ro */
 	info->parts[0].mask_flags = 0;
 	info->parts[0].ecclayout = &info->el;
 
-	info->parts[1].name = "ubi";
+	info->parts[1].name = "UBI";
 	info->parts[1].offset = tmp;
-//	info->parts[1].mask_flags = MTD_WRITEABLE;
+//	info->parts[1].mask_flags = MTD_WRITEABLE; /* for ro */
 	info->parts[1].mask_flags = 0;
 	info->parts[1].ecclayout = &info->el;
 
 	tmp = info->mtd.size - tmp;
-	tmp -= info->mtd.erasesize << 2; /* reserve 4 blocks for bbt */
-
+	tmp -= info->mtd.erasesize * 4; /* reserve 4 blocks for bbt */
 	info->parts[1].size = tmp;
 
 	err = mtd_device_parse_register(&info->mtd, NULL, NULL, info->parts, MAX_PARTS);
@@ -166,8 +158,6 @@ static int __init nand_init(void)
 		goto free_driver;
 	}
 	return 0;
-//free_device:
-//	platform_device_unregister(&nand_device);
 free_driver:
 	platform_driver_unregister(&nand_driver);
 	return err;

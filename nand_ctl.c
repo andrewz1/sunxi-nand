@@ -1,6 +1,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <asm/cacheflush.h>
+#include <linux/leds.h>
 
 #include "main.h"
 
@@ -31,6 +31,8 @@ static const u8 ecc_bits[] =  { 16, 24, 28, 32, 40, 48,  56,  60,  64, };
 static u8 *buff;
 static dma_addr_t buff_dma;
 static int rbp; /* cur buff pos for read */
+
+DEFINE_LED_TRIGGER(sunxi_nand_led);
 
 static inline void nand_controller_enable(void)
 {
@@ -187,14 +189,14 @@ static inline int do_cmd(u32 cmd)
 	return wait_cmd_finish();
 }
 
-static inline int do_cmd_dma(u32 cmd, int rw, dma_addr_t dma_addr, u32 dma_len)
+static inline int do_cmd_dma(u32 cmd, int rw, u32 dma_len)
 {
 	int err;
 
 	if (wait_cmd_fifo())
 		return -1;
 	nand_to_dma();
-	nand_start_dma(rw, dma_addr, dma_len);
+	nand_start_dma(rw, buff, buff_dma, dma_len);
 	writel(cmd, NAND_CMD);
 	err = wait_dma_finish();
 	nand_to_ahb();
@@ -207,6 +209,7 @@ static inline u32 get_status(void)
 {
 	u32 cmd;
 
+	led_trigger_event(sunxi_nand_led, LED_OFF);
 	nand_to_ahb();
 	cmd = NAND_CMD_STATUS
 		| NAND_SEND_FIRST_CMD;
@@ -278,6 +281,7 @@ int nand_controller_init(void)
 	nand_controller_enable();
 	nand_set_rbsel(0);
 	nand_set_cesel(0);
+	led_trigger_register_simple(DRIVER_NAME, &sunxi_nand_led);
 	return 0;
 release_irq:
 	nand_release_irq();
@@ -292,6 +296,7 @@ free_dma:
 
 void nand_controller_exit(void)
 {
+	led_trigger_unregister_simple(sunxi_nand_led);
 	nand_controller_disable();
 	nand_controller_reset();
 	nand_release_dma();
@@ -335,7 +340,7 @@ int __nand_chip_readid(int addr)
 	writel(addr & 0xff, NAND_ADDR_LOW);
 	_SET_READ(cmd);
 	writel(len, NAND_CNT);
-	return do_cmd_dma(cmd, 0, buff_dma, len);
+	return do_cmd_dma(cmd, 0, len);
 		// return -1;
 	// for (i = 4; i < 8; i++)
 	// 	if (!(memcmp(buff, buff + i, 8 - i)))
@@ -356,7 +361,7 @@ int __nand_chip_param(int addr)
 	writel(addr & 0xff, NAND_ADDR_LOW);
 	_SET_READ(cmd);
 	writel(len, NAND_CNT);
-	return do_cmd_dma(cmd, 0, buff_dma, len);
+	return do_cmd_dma(cmd, 0, len);
 }
 
 int __nand_chip_read_page(struct mtd_info *mtd, int page)
@@ -383,7 +388,7 @@ int __nand_chip_read_page(struct mtd_info *mtd, int page)
 	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
 	writel(chip->ecc.steps, NAND_BLOCK_NUM);
-	err = do_cmd_dma(cmd, 0, buff_dma, mtd->writesize);
+	err = do_cmd_dma(cmd, 0, mtd->writesize);
 	disable_ecc();
 	disable_random();
 	return err;
@@ -414,7 +419,7 @@ int __nand_chip_read_page1k(struct mtd_info *mtd, int page)
 	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_READ(cmd);
 	writel(chip->ecc.steps, NAND_BLOCK_NUM);
-	err = do_cmd_dma(cmd, 0, buff_dma, mtd->writesize);
+	err = do_cmd_dma(cmd, 0, mtd->writesize);
 	disable_ecc();
 	disable_random();
 	return err;
@@ -429,6 +434,7 @@ int __do_read_page(struct mtd_info *mtd, int page)
 	u32 empty_mask = err_mask << 16;
 	int err, i;
 
+	led_trigger_event(sunxi_nand_led, LED_FULL);
 	if (page < info->pages1k)
 		err = __nand_chip_read_page1k(mtd, page);
 	else
@@ -451,6 +457,7 @@ int __nand_chip_erase(struct mtd_info *mtd, int page)
 	u32 pgs_per_blk = mtd->erasesize / mtd->writesize;
 	u32 cmd;
 
+	led_trigger_event(sunxi_nand_led, LED_FULL);
 	page = rounddown(page, pgs_per_blk);
 	nand_to_ahb();
 	cmd = NAND_ERASE
@@ -494,7 +501,7 @@ int __nand_chip_write_page(struct mtd_info *mtd, int page, int cache)
 	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_WRITE(cmd);
 	writel(chip->ecc.steps, NAND_BLOCK_NUM);
-	err = do_cmd_dma(cmd, 1, buff_dma, mtd->writesize);
+	err = do_cmd_dma(cmd, 1, mtd->writesize);
 	disable_ecc();
 	disable_random();
 	if (err)
@@ -533,7 +540,7 @@ int __nand_chip_write_page1k(struct mtd_info *mtd, int page, int cache)
 	writel((page & 0xff0000U) >> 16, NAND_ADDR_HIGH);
 	_SET_WRITE(cmd);
 	writel(chip->ecc.steps, NAND_BLOCK_NUM);
-	err = do_cmd_dma(cmd, 1, buff_dma, mtd->writesize);
+	err = do_cmd_dma(cmd, 1, mtd->writesize);
 	disable_ecc();
 	disable_random();
 	if (err)
@@ -552,6 +559,7 @@ int __do_write_page(struct mtd_info *mtd, int page, int cache)
 	u32 *oob = (u32 *)chip->oob_poi;
 	int i;
 
+	led_trigger_event(sunxi_nand_led, LED_FULL);
 	for (i = 0; i < chip->ecc.steps; i++)
 		writel(oob[i], NAND_USER_DATA(i));
 	if (page < info->pages1k)
@@ -579,6 +587,7 @@ u16 chip_read_word(struct mtd_info *mtd)
 
 void chip_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 {
+	led_trigger_event(sunxi_nand_led, LED_FULL);
 	memcpy(buff, buf, len);
 }
 
@@ -678,28 +687,8 @@ int chip_init_size(struct mtd_info *mtd, struct nand_chip *chip, u8 *id_data)
 
 int chip_dev_ready(struct mtd_info *mtd)
 {
+	led_trigger_event(sunxi_nand_led, LED_OFF);
 	return ((readl(NAND_ST) & NAND_RB_ALL) == NAND_RB_ALL);
-}
-
-static inline int send_cmd(u32 cmd)
-{
-	writel(cmd, NAND_CMD);
-	return wait_cmd_finish();
-}
-
-static inline int send_cmd_dma(u32 cmd, int dma_rw, dma_addr_t dma_addr, u32 dma_len)
-{
-	int err;
-
-	nand_to_dma();
-	nand_start_dma(dma_rw, dma_addr, dma_len);
-	writel(cmd, NAND_CMD);
-	err = wait_dma_finish();
-	nand_to_ahb();
-	if (err)
-		return -1;
-	nand_to_ahb();
-	return wait_cmd_finish();
 }
 
 void chip_erase_cmd(struct mtd_info *mtd, int page)
@@ -749,8 +738,13 @@ int chip_waitfunc(struct mtd_info *mtd, struct nand_chip *chip)
 
 int chip_write_page(struct mtd_info *mtd, struct nand_chip *chip, const u8 *buf, int page, int cached, int raw)
 {
+	int err;
+
+	led_trigger_event(sunxi_nand_led, LED_FULL);
 	memcpy(buff, buf, mtd->writesize);
-	if (__do_write_page(mtd, page, cached) < 0)
+	err = __do_write_page(mtd, page, cached);
+	led_trigger_event(sunxi_nand_led, LED_OFF);
+	if (err < 0)
 		return -EIO;
 	return 0;
 }
@@ -785,32 +779,45 @@ int chip_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, in
 		else
 			mtd->ecc_stats.corrected += ecc_result(chip, i);
 	}
+	led_trigger_event(sunxi_nand_led, LED_OFF);
 	return 0;
 }
 
 int chip_ecc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip, u8 *buf, int page)
 {
 	memcpy(buf, buff, mtd->writesize);
+	led_trigger_event(sunxi_nand_led, LED_OFF);
 	return 0;
 }
 
 int chip_ecc_read_oob(struct mtd_info *mtd, struct nand_chip *chip, int page, int sndcmd)
 {
-	if (sndcmd)
-		if (__do_read_page(mtd, page) < 0)
+	int err;
+
+	if (sndcmd) {
+		err = __do_read_page(mtd, page);
+		led_trigger_event(sunxi_nand_led, LED_OFF);
+		if (err < 0)
 			return -EIO;
+	} else
+		led_trigger_event(sunxi_nand_led, LED_OFF);
 	return 0;
 }
 
 void chip_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip, const u8 *buf)
 {
 	memcpy(buff, buf, mtd->writesize);
+	led_trigger_event(sunxi_nand_led, LED_OFF);
 }
 
 int chip_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
 {
+	int err;
+
 	memset(buff, 0xff, mtd->writesize);
-	if (__do_write_page(mtd, page, 0) < 0)
+	err = __do_write_page(mtd, page, 0);
+	led_trigger_event(sunxi_nand_led, LED_OFF);
+	if (err < 0)
 		return -EIO;
 	return 0;
 }

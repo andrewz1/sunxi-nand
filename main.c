@@ -133,9 +133,19 @@ static void nand_noop(struct device *dev)
 	return;
 }
 
+static struct resource sunxi_nand_res[] = {
+	{
+		.start	= NAND_PHY_BASE,
+		.end	= NAND_PHY_BASE + 0xfffU,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
 static struct platform_device nand_device = {
 	.name = DRIVER_NAME,
 	.id = -1,
+	.num_resources = ARRAY_SIZE(sunxi_nand_res),
+	.resource = sunxi_nand_res,
 	.dev = {
 		.release = nand_noop,
 	},
@@ -173,3 +183,21 @@ static void __exit nand_exit(void)
 
 module_init(nand_init);
 module_exit(nand_exit);
+
+#if 0
+static struct resource sw_res_nand =
+{
+	.start = SW_PA_NANDFLASHC_IO_BASE,
+	.end = SW_PA_NANDFLASHC_IO_BASE + 0xfff,
+	.flags = IORESOURCE_MEM,
+};
+
+struct platform_device sw_pdev_nand =
+{
+	.name = "sw_nand",
+	.id = -1,
+	.num_resources = 1,
+	.resource = &sw_res_nand,
+	.dev = {}
+};
+#endif

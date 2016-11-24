@@ -48,10 +48,9 @@ void nand_release_dma(void)
 	dma_ch = -1;
 }
 
-void nand_start_dma(int rw, dma_addr_t buff_addr, u32 len)
+void nand_start_dma(int rw, void *buff_virt, dma_addr_t buff_addr, u32 buff_len)
 {
 	struct dma_hw_conf nand_hwconf;
-	int ret;
 
 	memset(&nand_hwconf, 0, sizeof(nand_hwconf));
 	if (rw == 0) { /* read */
@@ -76,11 +75,10 @@ void nand_start_dma(int rw, dma_addr_t buff_addr, u32 len)
 		nand_hwconf.cmbk			= 0x7f077f07;
 	}
 	INIT_COMPLETION(nand_dma_done);
-	ret = sw_dma_config(dma_ch, &nand_hwconf);
-	ret = sw_dma_setflags(dma_ch, SW_DMAF_AUTOSTART);
-//	__cpuc_flush_dcache_area((void *)buff_addr, len);
-	ret = sw_dma_enqueue(dma_ch, dma_seq++, buff_addr, len);
-//	ret = sw_dma_ctrl(dma_ch, SW_DMAOP_START);
+	sw_dma_config(dma_ch, &nand_hwconf);
+	sw_dma_setflags(dma_ch, SW_DMAF_AUTOSTART);
+	dmac_flush_range(buff_virt, buff_virt + buff_len);
+	sw_dma_enqueue(dma_ch, dma_seq++, buff_addr, buff_len);
 }
 
 int wait_dma_finish(void)
